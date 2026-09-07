@@ -1,0 +1,290 @@
+"use client";
+
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import {
+  addPhoto,
+  getPhotosWithSignedUrls,
+  isAcceptedImage,
+  PHOTO_ACCEPT,
+  type PhotoUploadStage,
+  type PhotoWithUrl,
+} from "@/lib/photos";
+import { isHeicFile } from "@/lib/heic";
+import type { Participant } from "@/lib/participants";
+import { PhotoDetail } from "@/components/photo-detail";
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "Something went wrong. Please try again.";
+}
+
+export function PhotoFeed({ participant }: { participant: Participant }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [photos, setPhotos] = useState<PhotoWithUrl[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [caption, setCaption] = useState("");
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [isLoadingFeed, setIsLoadingFeed] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStage, setUploadStage] = useState<PhotoUploadStage | null>(null);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<PhotoWithUrl | null>(null);
+
+  async function loadPhotos() {
+    setFeedError(null);
+    const nextPhotos = await getPhotosWithSignedUrls();
+    setPhotos(nextPhotos);
+  }
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadFeed() {
+      try {
+        const nextPhotos = await getPhotosWithSignedUrls();
+
+        if (isActive) {
+          setPhotos(nextPhotos);
+        }
+      } catch (error) {
+        if (isActive) {
+          setFeedError(getErrorMessage(error));
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingFeed(false);
+        }
+      }
+    }
+
+    void loadFeed();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  function resetComposer() {
+    setSelectedFile(null);
+    setCaption("");
+    setUploadError(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+
+    if (!isAcceptedImage(file)) {
+      setSelectedFile(null);
+      setUploadError("Please choose a JPEG, PNG, WebP, or HEIC image.");
+      event.target.value = "";
+      return;
+    }
+
+    setSelectedFile(file);
+    setUploadError(null);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedFile || isUploading) {
+      setUploadError("Choose a photo to add.");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadStage(isHeicFile(selectedFile) ? "converting" : "uploading");
+    setUploadError(null);
+
+    try {
+      await addPhoto(participant.id, selectedFile, caption, setUploadStage);
+      resetComposer();
+      setIsComposerOpen(false);
+      await loadPhotos();
+    } catch (error) {
+      setUploadError(getErrorMessage(error));
+    } finally {
+      setIsUploading(false);
+      setUploadStage(null);
+    }
+  }
+
+  return (
+    <section className="mt-10 border-t border-rule pt-8" aria-labelledby="photo-feed-heading">
+      <div
+        inert={selectedPhoto ? true : undefined}
+        aria-hidden={selectedPhoto ? true : undefined}
+      >
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium tracking-[0.22em] text-ink-muted uppercase">
+            Shared album
+          </p>
+          <h2
+            id="photo-feed-heading"
+            className="font-serif mt-2 text-3xl leading-tight tracking-tight text-ink"
+          >
+            Photos
+          </h2>
+        </div>
+        {selectedPhoto ? (
+          <span className="inline-flex h-11 min-w-11" aria-hidden="true" />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setIsComposerOpen((open) => !open);
+              if (isComposerOpen) {
+                resetComposer();
+              }
+            }}
+            disabled={isUploading}
+            className="inline-flex h-11 items-center justify-center rounded-md px-3 text-sm font-medium text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50"
+            aria-expanded={isComposerOpen}
+            aria-controls="photo-composer"
+          >
+            {isComposerOpen ? "Close" : "+ Add"}
+          </button>
+        )}
+      </div>
+
+      {isComposerOpen ? (
+        <form id="photo-composer" className="mt-6 space-y-4" onSubmit={handleSubmit}>
+          <input
+            ref={fileInputRef}
+            id="photo-file"
+            type="file"
+            accept={PHOTO_ACCEPT}
+            className="sr-only"
+            onChange={handleFileChange}
+            disabled={isUploading}
+          />
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="inline-flex h-12 w-full items-center justify-center rounded-md border border-rule bg-paper-raised px-5 text-base font-medium text-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Add Photo
+          </button>
+
+          {selectedFile ? (
+            <p className="text-sm leading-6 text-ink-muted">
+              Selected: {selectedFile.name}
+            </p>
+          ) : null}
+
+          {isUploading ? (
+            <p className="text-sm leading-6 text-ink-muted" role="status" aria-live="polite">
+              Adding photo…
+            </p>
+          ) : null}
+
+          <div className="space-y-2">
+            <label htmlFor="photo-caption" className="block text-sm font-medium text-ink">
+              Caption
+              <span className="font-normal text-ink-muted"> (optional)</span>
+            </label>
+            <input
+              id="photo-caption"
+              name="caption"
+              type="text"
+              value={caption}
+              onChange={(event) => setCaption(event.target.value)}
+              disabled={isUploading}
+              className="h-12 w-full rounded-md border border-rule bg-paper-raised px-4 text-base text-ink outline-none placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30 disabled:opacity-60"
+              placeholder="A line to remember this by"
+            />
+          </div>
+
+          {uploadError ? (
+            <p className="text-sm leading-6 text-clay" role="alert">
+              {uploadError}
+            </p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={isUploading || !selectedFile}
+            className="inline-flex h-12 w-full items-center justify-center rounded-md bg-ink px-5 text-base font-medium text-paper transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUploading ? "Adding…" : "Share this photo"}
+          </button>
+        </form>
+      ) : null}
+
+      <div className="mt-6" aria-live="polite">
+        {isLoadingFeed ? (
+          <p className="text-base leading-7 text-ink-muted">Gathering photos…</p>
+        ) : null}
+
+        {feedError ? (
+          <p className="text-sm leading-6 text-clay" role="alert">
+            {feedError}
+          </p>
+        ) : null}
+
+        {!isLoadingFeed && !feedError && photos.length === 0 ? (
+          <p className="text-base leading-7 text-ink-muted">
+            No photos yet. Add the first one for the weekend.
+          </p>
+        ) : null}
+
+        <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
+          {photos.map((photo) => (
+            <li key={photo.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsComposerOpen(false);
+                  resetComposer();
+                  setSelectedPhoto(photo);
+                }}
+                className="block w-full overflow-hidden bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                aria-label={photo.caption || "Open photo"}
+              >
+                {photo.signedUrl ? (
+                  // Signed URLs expire and should not be optimized through next/image.
+                  // Thumbnail object-cover is display-only and does not alter the stored file.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photo.signedUrl}
+                    alt={photo.caption || "Weekend photo"}
+                    className="aspect-square h-auto w-full object-cover"
+                  />
+                ) : (
+                  <span className="flex aspect-square items-center justify-center px-3 text-left text-sm leading-6 text-ink-muted">
+                    Unavailable
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      </div>
+
+      {selectedPhoto ? (
+        <PhotoDetail
+          photo={selectedPhoto}
+          participant={participant}
+          onClose={() => setSelectedPhoto(null)}
+        />
+      ) : null}
+    </section>
+  );
+}
