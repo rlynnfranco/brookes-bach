@@ -111,7 +111,7 @@ export function PhotoVotes({
         id="photo-votes-heading"
         className="font-serif text-lg leading-6 tracking-tight text-ink"
       >
-        Where does this belong?
+        For Your Consideration
       </h3>
 
       {isLoading ? (
@@ -119,7 +119,7 @@ export function PhotoVotes({
           Loading your votes…
         </p>
       ) : (
-        <ul className="mt-3 space-y-1.5">
+        <ul className="mt-3 space-y-1">
           {categories.map((category) => {
             const isSelected = selected.has(category.value);
             const isPending = pending.has(category.value);
@@ -131,14 +131,25 @@ export function PhotoVotes({
                   aria-pressed={isSelected}
                   disabled={isPending}
                   onClick={() => handleToggle(category.value)}
-                  className={`flex min-h-11 w-full items-center gap-2.5 rounded-md border px-3 py-2 text-left text-sm leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-wait ${
+                  className={`flex min-h-11 w-full items-center gap-2.5 rounded-md border px-3 py-1.5 text-left text-sm leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-wait ${
                     isSelected
                       ? "border-ink bg-ink text-paper"
                       : "border-rule bg-paper-raised text-ink"
                   }`}
                 >
                   <VoteCategoryIcon category={category.value} />
-                  <span>{category.label}</span>
+                  <span className="min-w-0">
+                    <span className="block">{category.label}</span>
+                    {"description" in category && category.description ? (
+                      <span
+                        className={`mt-px block text-[11px] leading-3.5 ${
+                          isSelected ? "text-paper/65" : "text-ink-soft"
+                        }`}
+                      >
+                        {category.description}
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
               </li>
             );

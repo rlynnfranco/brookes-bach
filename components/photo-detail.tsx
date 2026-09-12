@@ -4,6 +4,7 @@ import { useEffect, useId, useRef } from "react";
 import type { Participant } from "@/lib/participants";
 import type { PhotoWithUrl } from "@/lib/photos";
 import { PhotoVotes } from "@/components/photo-votes";
+import { PhotoComments } from "@/components/photo-comments";
 
 export function PhotoDetail({
   photo,
@@ -126,6 +127,7 @@ export function PhotoDetail({
           </div>
 
           <PhotoVotes photoId={photo.id} participant={participant} />
+          <PhotoComments photoId={photo.id} participant={participant} />
         </div>
       </div>
     </div>

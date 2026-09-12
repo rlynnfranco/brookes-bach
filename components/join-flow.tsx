@@ -8,11 +8,16 @@ import {
   signInAnonymouslyIfNeeded,
   type Participant,
 } from "@/lib/participants";
+import {
+  grantWeekendAccess,
+  hasWeekendAccess,
+  verifyWeekendAccessCode,
+} from "@/lib/access";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { PhotoFeed } from "@/components/photo-feed";
 import { Overheard } from "@/components/overheard";
 
-type View = "loading" | "join" | "welcome";
+type View = "loading" | "access" | "join" | "welcome";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -25,10 +30,12 @@ function getErrorMessage(error: unknown) {
 export function JoinFlow() {
   const [view, setView] = useState<View>("loading");
   const [name, setName] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [participant, setParticipant] = useState<Participant | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -40,33 +47,32 @@ export function JoinFlow() {
             setError(
               "Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local, save the file, and restart the dev server.",
             );
-            setView("join");
+            setView("access");
           }
           return;
         }
 
         const userId = await getCurrentUserId();
 
-        if (!userId) {
-          if (isActive) {
-            setView("join");
-          }
-          return;
-        }
+        if (userId) {
+          const existingParticipant = await getParticipantByAuthUserId(userId);
 
-        const existingParticipant = await getParticipantByAuthUserId(userId);
+          if (!isActive) {
+            return;
+          }
+
+          if (existingParticipant) {
+            setParticipant(existingParticipant);
+            setView("welcome");
+            return;
+          }
+        }
 
         if (!isActive) {
           return;
         }
 
-        if (existingParticipant) {
-          setParticipant(existingParticipant);
-          setView("welcome");
-          return;
-        }
-
-        setView("join");
+        setView(hasWeekendAccess() ? "join" : "access");
       } catch (restoreError) {
         if (isActive) {
           const message = getErrorMessage(restoreError);
@@ -75,7 +81,7 @@ export function JoinFlow() {
             setError(message);
           }
 
-          setView("join");
+          setView(hasWeekendAccess() ? "join" : "access");
         }
       }
     }
@@ -86,6 +92,45 @@ export function JoinFlow() {
       isActive = false;
     };
   }, []);
+
+  async function handleAccessSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const trimmedCode = accessCode.trim();
+
+    if (!trimmedCode) {
+      setAccessError("Please enter the weekend code.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setAccessError(null);
+
+    try {
+      if (!isSupabaseConfigured()) {
+        throw new Error(
+          "Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local, save the file, and restart the dev server.",
+        );
+      }
+
+      await signInAnonymouslyIfNeeded();
+      const isValid = await verifyWeekendAccessCode(trimmedCode);
+
+      if (!isValid) {
+        setAccessError("Not quite. Try again.");
+        return;
+      }
+
+      grantWeekendAccess();
+      setAccessCode("");
+      setView("join");
+    } catch (submitError) {
+      setError(getErrorMessage(submitError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -147,6 +192,82 @@ export function JoinFlow() {
           >
             Opening the door…
           </p>
+        ) : null}
+
+        {view === "access" ? (
+          <>
+            <p className="mt-6 max-w-sm text-lg leading-8 text-ink-muted">
+              You’ll need the weekend code to get in.
+            </p>
+
+            <form
+              className="mt-10 space-y-6"
+              onSubmit={handleAccessSubmit}
+              noValidate
+            >
+              <div className="space-y-2">
+                <label
+                  htmlFor="weekend-code"
+                  className="block text-sm font-medium text-ink"
+                >
+                  Weekend code
+                </label>
+                <input
+                  id="weekend-code"
+                  name="weekendCode"
+                  type="text"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={accessCode}
+                  onChange={(event) => {
+                    setAccessCode(event.target.value);
+                    if (accessError) {
+                      setAccessError(null);
+                    }
+                  }}
+                  aria-invalid={accessError ? true : undefined}
+                  aria-describedby={
+                    accessError
+                      ? "access-error"
+                      : error
+                        ? "join-error"
+                        : undefined
+                  }
+                  className="h-12 w-full rounded-md border border-rule bg-paper-raised px-4 text-base text-ink shadow-none outline-none transition-colors placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30"
+                />
+              </div>
+
+              {accessError ? (
+                <p
+                  id="access-error"
+                  className="text-sm leading-6 text-clay"
+                  role="alert"
+                >
+                  {accessError}
+                </p>
+              ) : null}
+
+              {error ? (
+                <p
+                  id="join-error"
+                  className="text-sm leading-6 text-clay"
+                  role="alert"
+                >
+                  {error}
+                </p>
+              ) : null}
+
+              <button
+                type="submit"
+                disabled={isSubmitting || accessCode.trim().length === 0}
+                className="inline-flex h-12 w-full items-center justify-center rounded-md bg-ink px-5 text-base font-medium text-paper transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmitting ? "Checking…" : "Enter"}
+              </button>
+            </form>
+          </>
         ) : null}
 
         {view === "join" ? (

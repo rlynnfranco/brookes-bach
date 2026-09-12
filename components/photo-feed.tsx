@@ -3,15 +3,23 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import {
   addPhoto,
+  getLastSeenPhotosAt,
   getPhotosWithSignedUrls,
+  getPhotoWithSignedUrl,
+  insertPhotoNewestFirst,
   isAcceptedImage,
+  isPhotoNewerThan,
   PHOTO_ACCEPT,
+  photoFromRealtimeRow,
+  setLastSeenPhotosAt,
   type PhotoUploadStage,
   type PhotoWithUrl,
 } from "@/lib/photos";
 import { isHeicFile } from "@/lib/heic";
 import type { Participant } from "@/lib/participants";
 import { PhotoDetail } from "@/components/photo-detail";
+import { supabase } from "@/lib/supabase";
+import { useOnVisible } from "@/lib/visibility";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -33,12 +41,80 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
   const [feedError, setFeedError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoWithUrl | null>(null);
+  const [newPhotoIds, setNewPhotoIds] = useState<Set<string>>(() => new Set());
+  const knownPhotoIdsRef = useRef<Set<string> | null>(null);
+
+  function addNewPhotoIds(photoIds: string[]) {
+    if (photoIds.length === 0) {
+      return;
+    }
+
+    setNewPhotoIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+
+      for (const photoId of photoIds) {
+        if (!next.has(photoId)) {
+          next.add(photoId);
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }
+
+  function rememberGalleryVisit(nextPhotos: PhotoWithUrl[]) {
+    const knownIds = knownPhotoIdsRef.current;
+
+    if (knownIds === null) {
+      const previousSeenAt = getLastSeenPhotosAt();
+
+      if (previousSeenAt) {
+        addNewPhotoIds(
+          nextPhotos
+            .filter((photo) => isPhotoNewerThan(photo.created_at, previousSeenAt))
+            .map((photo) => photo.id),
+        );
+      }
+
+      knownPhotoIdsRef.current = new Set(nextPhotos.map((photo) => photo.id));
+    } else {
+      const newcomerIds = nextPhotos
+        .filter((photo) => !knownIds.has(photo.id))
+        .map((photo) => photo.id);
+
+      for (const photoId of newcomerIds) {
+        knownIds.add(photoId);
+      }
+
+      addNewPhotoIds(newcomerIds);
+    }
+
+    setLastSeenPhotosAt();
+  }
 
   async function loadPhotos() {
     setFeedError(null);
     const nextPhotos = await getPhotosWithSignedUrls();
     setPhotos(nextPhotos);
+    rememberGalleryVisit(nextPhotos);
   }
+
+  async function refreshPhotos() {
+    try {
+      const nextPhotos = await getPhotosWithSignedUrls();
+      setPhotos(nextPhotos);
+      rememberGalleryVisit(nextPhotos);
+      setFeedError(null);
+    } catch {
+      // Keep the current gallery if a background refresh fails.
+    }
+  }
+
+  useOnVisible(() => {
+    void refreshPhotos();
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -49,6 +125,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
 
         if (isActive) {
           setPhotos(nextPhotos);
+          rememberGalleryVisit(nextPhotos);
         }
       } catch (error) {
         if (isActive) {
@@ -67,6 +144,58 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
       isActive = false;
     };
   }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("weekend-photos")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "photos" },
+        (payload) => {
+          const row = photoFromRealtimeRow(payload.new);
+
+          if (!row) {
+            return;
+          }
+
+          void (async () => {
+            try {
+              const nextPhoto = await getPhotoWithSignedUrl(row);
+              setPhotos((current) => insertPhotoNewestFirst(current, nextPhoto));
+            } catch {
+              // Leave the gallery as-is if a live photo cannot be hydrated.
+            }
+          })();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const knownIds = knownPhotoIdsRef.current;
+
+    if (!knownIds) {
+      return;
+    }
+
+    const newcomerIds = photos
+      .filter((photo) => !knownIds.has(photo.id))
+      .map((photo) => photo.id);
+
+    if (newcomerIds.length === 0) {
+      return;
+    }
+
+    for (const photoId of newcomerIds) {
+      knownIds.add(photoId);
+    }
+
+    addNewPhotoIds(newcomerIds);
+  }, [photos]);
 
   function resetComposer() {
     setSelectedFile(null);
@@ -245,35 +374,48 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
         ) : null}
 
         <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
-          {photos.map((photo) => (
-            <li key={photo.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsComposerOpen(false);
-                  resetComposer();
-                  setSelectedPhoto(photo);
-                }}
-                className="block w-full overflow-hidden bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-                aria-label={photo.caption || "Open photo"}
-              >
-                {photo.signedUrl ? (
-                  // Signed URLs expire and should not be optimized through next/image.
-                  // Thumbnail object-cover is display-only and does not alter the stored file.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photo.signedUrl}
-                    alt={photo.caption || "Weekend photo"}
-                    className="aspect-square h-auto w-full object-cover"
-                  />
-                ) : (
-                  <span className="flex aspect-square items-center justify-center px-3 text-left text-sm leading-6 text-ink-muted">
-                    Unavailable
+          {photos.map((photo) => {
+            const isNew = newPhotoIds.has(photo.id);
+
+            return (
+              <li key={photo.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsComposerOpen(false);
+                    resetComposer();
+                    setSelectedPhoto(photo);
+                  }}
+                  className="relative block w-full overflow-hidden bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                  aria-label={
+                    isNew
+                      ? `${photo.caption || "Open photo"}, new`
+                      : photo.caption || "Open photo"
+                  }
+                >
+                  {photo.signedUrl ? (
+                    // Signed URLs expire and should not be optimized through next/image.
+                    // Thumbnail object-cover is display-only and does not alter the stored file.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={photo.signedUrl}
+                      alt={photo.caption || "Weekend photo"}
+                      className="aspect-square h-auto w-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex aspect-square items-center justify-center px-3 text-left text-sm leading-6 text-ink-muted">
+                      Unavailable
+                    </span>
+                  )}
+                  {isNew ? (
+                  <span className="absolute top-1.5 left-1.5 border border-rule bg-paper/95 px-1.5 py-0.5 text-[10px] font-medium tracking-[0.16em] text-ink uppercase">
+                    New
                   </span>
-                )}
-              </button>
-            </li>
-          ))}
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
       </div>

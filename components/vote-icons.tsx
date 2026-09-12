@@ -31,32 +31,32 @@ function TrophyIcon() {
   );
 }
 
-function SmileIcon() {
+function FilmIcon() {
   return (
     <Icon>
-      <circle cx="12" cy="12" r="8" />
-      <path d="M9 10h.01" />
-      <path d="M15 10h.01" />
-      <path d="M8.6 14c.8 1.3 2 2 3.4 2s2.6-.7 3.4-2" />
+      <rect x="3.5" y="6" width="17" height="12" rx="1.5" />
+      <path d="M3.5 10h17" />
+      <path d="M3.5 14h17" />
+      <path d="M8 6v12" />
+      <path d="M16 6v12" />
     </Icon>
   );
 }
 
-function QuestionIcon() {
+function FlameIcon() {
   return (
     <Icon>
-      <circle cx="12" cy="12" r="8" />
-      <path d="M9.6 9.4a2.4 2.4 0 1 1 3.3 2.2c-.8.4-1.4 1-1.4 1.9" />
-      <path d="M12 17h.01" />
+      <path d="M12 19c3.2 0 5-2.2 5-5.2 0-2.8-1.8-4.6-3.2-6.2-.4-.5-1.3-.2-1.3.5 0 .8-.4 1.5-1.1 1.7-1.2.3-2.4-.7-2.4-2.1 0-1.5 1-3 2.4-4.7.2-.3-.1-.7-.5-.6C8.3 3.2 5 6.3 5 11.2 5 15.4 8 19 12 19Z" />
     </Icon>
   );
 }
 
-function FrameIcon() {
+function TelevisionIcon() {
   return (
     <Icon>
-      <rect x="4" y="5" width="16" height="14" rx="1.5" />
-      <path d="m8 15 2.6-3.2 2.2 2.4L16 11l4 4" />
+      <rect x="3.5" y="6.5" width="17" height="11" rx="1.5" />
+      <path d="M8 20h8" />
+      <path d="M12 17.5V20" />
     </Icon>
   );
 }
@@ -117,13 +117,13 @@ export function VoteCategoryIcon({ category }: { category: VoteCategory }) {
   switch (category) {
     case "photo_of_weekend":
       return <TrophyIcon />;
-    case "funniest":
-      return <SmileIcon />;
-    case "most_concerning":
-      return <QuestionIcon />;
-    case "best_composition":
-      return <FrameIcon />;
-    case "peoples_choice":
+    case "a24_or_lifetime":
+      return <FilmIcon />;
+    case "portrait_on_fire":
+      return <FlameIcon />;
+    case "wrong_reasons":
+      return <TelevisionIcon />;
+    case "criterion_collection":
       return <BookIcon />;
     case "brides_favorite":
       return <HeartIcon />;

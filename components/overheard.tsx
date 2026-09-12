@@ -1,15 +1,22 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Participant } from "@/lib/participants";
 import {
   addQuoteLike,
+  applyQuoteLikeEvent,
   createQuote,
   getQuotesWithLikes,
+  insertQuoteNewestFirst,
+  quoteFromRealtimeRow,
+  quoteLikeFromRealtimeRow,
+  quoteWithEmptyLikes,
   removeQuoteLike,
   type QuoteWithLikes,
 } from "@/lib/quotes";
 import { HeartFilledIcon, HeartOutlineIcon } from "@/components/vote-icons";
+import { supabase } from "@/lib/supabase";
+import { useOnVisible } from "@/lib/visibility";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -30,6 +37,22 @@ export function Overheard({ participant }: { participant: Participant }) {
   const [listError, setListError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [likeError, setLikeError] = useState<string | null>(null);
+  const participantIdRef = useRef(participant.id);
+  participantIdRef.current = participant.id;
+
+  async function refreshQuotes() {
+    try {
+      const nextQuotes = await getQuotesWithLikes(participantIdRef.current);
+      setQuotes(nextQuotes);
+      setListError(null);
+    } catch {
+      // Keep the current record if a background refresh fails.
+    }
+  }
+
+  useOnVisible(() => {
+    void refreshQuotes();
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -58,6 +81,72 @@ export function Overheard({ participant }: { participant: Participant }) {
       isActive = false;
     };
   }, [participant.id]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("weekend-overheard")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "quotes" },
+        (payload) => {
+          const row = quoteFromRealtimeRow(payload.new);
+
+          if (!row) {
+            return;
+          }
+
+          setQuotes((current) =>
+            insertQuoteNewestFirst(current, quoteWithEmptyLikes(row)),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "quote_likes" },
+        (payload) => {
+          const like = quoteLikeFromRealtimeRow(payload.new);
+
+          if (!like) {
+            return;
+          }
+
+          setQuotes((current) =>
+            applyQuoteLikeEvent(
+              current,
+              like,
+              participantIdRef.current,
+              "insert",
+            ),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "quote_likes" },
+        (payload) => {
+          const like = quoteLikeFromRealtimeRow(payload.old);
+
+          if (!like) {
+            void refreshQuotes();
+            return;
+          }
+
+          setQuotes((current) =>
+            applyQuoteLikeEvent(
+              current,
+              like,
+              participantIdRef.current,
+              "delete",
+            ),
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
 
   function resetComposer() {
     setQuoteText("");

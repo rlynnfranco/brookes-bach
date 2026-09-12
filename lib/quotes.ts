@@ -101,6 +101,110 @@ export async function addQuoteLike(quoteId: string, participantId: string) {
   }
 }
 
+export function quoteFromRealtimeRow(value: unknown): Quote | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+
+  if (typeof row.id !== "string" || typeof row.quote !== "string") {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    participant_id:
+      typeof row.participant_id === "string" ? row.participant_id : "",
+    quote: row.quote,
+    said_by: typeof row.said_by === "string" ? row.said_by : null,
+    include_in_book: Boolean(row.include_in_book),
+    created_at: typeof row.created_at === "string" ? row.created_at : "",
+  };
+}
+
+export function quoteWithEmptyLikes(quote: Quote): QuoteWithLikes {
+  return {
+    ...quote,
+    likeCount: 0,
+    likedByMe: false,
+  };
+}
+
+export function insertQuoteNewestFirst(
+  quotes: QuoteWithLikes[],
+  nextQuote: QuoteWithLikes,
+) {
+  if (quotes.some((quote) => quote.id === nextQuote.id)) {
+    return quotes;
+  }
+
+  const nextTime = Date.parse(nextQuote.created_at) || 0;
+  const insertAt = quotes.findIndex(
+    (quote) => (Date.parse(quote.created_at) || 0) < nextTime,
+  );
+
+  if (insertAt === -1) {
+    return [...quotes, nextQuote];
+  }
+
+  return [...quotes.slice(0, insertAt), nextQuote, ...quotes.slice(insertAt)];
+}
+
+export function quoteLikeFromRealtimeRow(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+
+  if (typeof row.quote_id !== "string" || typeof row.participant_id !== "string") {
+    return null;
+  }
+
+  return {
+    quoteId: row.quote_id,
+    participantId: row.participant_id,
+  };
+}
+
+export function applyQuoteLikeEvent(
+  quotes: QuoteWithLikes[],
+  like: { quoteId: string; participantId: string },
+  myParticipantId: string,
+  change: "insert" | "delete",
+) {
+  return quotes.map((quote) => {
+    if (quote.id !== like.quoteId) {
+      return quote;
+    }
+
+    const isMine = like.participantId === myParticipantId;
+
+    if (change === "insert") {
+      if (isMine && quote.likedByMe) {
+        return quote;
+      }
+
+      return {
+        ...quote,
+        likedByMe: isMine ? true : quote.likedByMe,
+        likeCount: quote.likeCount + 1,
+      };
+    }
+
+    if (isMine && !quote.likedByMe) {
+      return quote;
+    }
+
+    return {
+      ...quote,
+      likedByMe: isMine ? false : quote.likedByMe,
+      likeCount: Math.max(0, quote.likeCount - 1),
+    };
+  });
+}
+
 export async function removeQuoteLike(quoteId: string, participantId: string) {
   const { error } = await supabase
     .from("quote_likes")

@@ -22,6 +22,31 @@ const ACCEPTED_IMAGE_EXTENSIONS = new Set([
   "heif",
 ]);
 
+export const LAST_SEEN_PHOTOS_STORAGE_KEY = "brookes_bach_last_seen_photos_at";
+
+export function getLastSeenPhotosAt() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(LAST_SEEN_PHOTOS_STORAGE_KEY);
+}
+
+export function setLastSeenPhotosAt(timestamp = new Date().toISOString()) {
+  window.localStorage.setItem(LAST_SEEN_PHOTOS_STORAGE_KEY, timestamp);
+}
+
+export function isPhotoNewerThan(createdAt: string, lastSeenAt: string) {
+  const createdTime = Date.parse(createdAt);
+  const lastSeenTime = Date.parse(lastSeenAt);
+
+  if (Number.isNaN(createdTime) || Number.isNaN(lastSeenTime)) {
+    return false;
+  }
+
+  return createdTime > lastSeenTime;
+}
+
 export const PHOTO_ACCEPT =
   "image/heic,image/heif,image/jpeg,image/png,image/webp,.heic,.heif,.jpg,.jpeg,.png,.webp";
 
@@ -258,4 +283,70 @@ export async function getPhotosWithSignedUrls() {
     signedUrl: urlByPath.get(photo.storage_path) ?? null,
     uploaderName: nameById.get(photo.participant_id) ?? null,
   }));
+}
+
+export function photoFromRealtimeRow(value: unknown): Photo | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+
+  if (
+    typeof row.id !== "string" ||
+    typeof row.participant_id !== "string" ||
+    typeof row.storage_path !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    participant_id: row.participant_id,
+    storage_path: row.storage_path,
+    original_storage_path:
+      typeof row.original_storage_path === "string"
+        ? row.original_storage_path
+        : null,
+    caption: typeof row.caption === "string" ? row.caption : null,
+    created_at: typeof row.created_at === "string" ? row.created_at : "",
+  };
+}
+
+export function insertPhotoNewestFirst(
+  photos: PhotoWithUrl[],
+  nextPhoto: PhotoWithUrl,
+) {
+  if (photos.some((photo) => photo.id === nextPhoto.id)) {
+    return photos;
+  }
+
+  const nextTime = Date.parse(nextPhoto.created_at) || 0;
+  const insertAt = photos.findIndex(
+    (photo) => (Date.parse(photo.created_at) || 0) < nextTime,
+  );
+
+  if (insertAt === -1) {
+    return [...photos, nextPhoto];
+  }
+
+  return [...photos.slice(0, insertAt), nextPhoto, ...photos.slice(insertAt)];
+}
+
+export async function getPhotoWithSignedUrl(photo: Photo) {
+  const { data } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(photo.storage_path, SIGNED_URL_SECONDS);
+
+  const { data: participant } = await supabase
+    .from("participants")
+    .select("name")
+    .eq("id", photo.participant_id)
+    .maybeSingle();
+
+  return {
+    ...photo,
+    signedUrl: data?.signedUrl ?? null,
+    uploaderName: (participant?.name as string | undefined) ?? null,
+  } satisfies PhotoWithUrl;
 }

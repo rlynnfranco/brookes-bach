@@ -1,17 +1,36 @@
 import { supabase } from "@/lib/supabase";
 
 export const GUEST_VOTE_CATEGORIES = [
-  { value: "photo_of_weekend", label: "Photo of the Weekend", emoji: "🏆" },
-  { value: "funniest", label: "Funniest Photo", emoji: "😂" },
-  { value: "most_concerning", label: "Most Concerning Without Context", emoji: "🤨" },
-  { value: "best_composition", label: "Best Composition", emoji: "🎨" },
-  { value: "peoples_choice", label: "People’s Choice for the Book", emoji: "📖" },
+  {
+    value: "photo_of_weekend",
+    label: "Photo of the Weekend",
+    description: "The crown jewel.",
+  },
+  {
+    value: "a24_or_lifetime",
+    label: "A24 or Lifetime?",
+    description: "Art film, cautionary tale, or both.",
+  },
+  {
+    value: "portrait_on_fire",
+    label: "Portrait of a Lady on Fire",
+    description: "Yearning. Drama. Excellent lighting.",
+  },
+  {
+    value: "wrong_reasons",
+    label: "For the Wrong Reasons",
+    description: "Questionable choices. Impeccable television.",
+  },
+  {
+    value: "criterion_collection",
+    label: "The Criterion Collection",
+    description: "An important work of cultural significance.",
+  },
 ] as const;
 
 export const BRIDES_FAVORITE_CATEGORY = {
   value: "brides_favorite",
   label: "Bride’s Favorite",
-  emoji: "❤️",
 } as const;
 
 export type VoteCategory =
