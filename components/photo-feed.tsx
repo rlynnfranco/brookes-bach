@@ -64,20 +64,23 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
     });
   }
 
+  function photosNewerThanLastVisit(nextPhotos: PhotoWithUrl[]) {
+    const previousSeenAt = getLastSeenPhotosAt();
+
+    if (!previousSeenAt) {
+      return [];
+    }
+
+    return nextPhotos
+      .filter((photo) => isPhotoNewerThan(photo.created_at, previousSeenAt))
+      .map((photo) => photo.id);
+  }
+
   function rememberGalleryVisit(nextPhotos: PhotoWithUrl[]) {
     const knownIds = knownPhotoIdsRef.current;
 
     if (knownIds === null) {
-      const previousSeenAt = getLastSeenPhotosAt();
-
-      if (previousSeenAt) {
-        addNewPhotoIds(
-          nextPhotos
-            .filter((photo) => isPhotoNewerThan(photo.created_at, previousSeenAt))
-            .map((photo) => photo.id),
-        );
-      }
-
+      addNewPhotoIds(photosNewerThanLastVisit(nextPhotos));
       knownPhotoIdsRef.current = new Set(nextPhotos.map((photo) => photo.id));
     } else {
       const newcomerIds = nextPhotos
@@ -94,6 +97,12 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
     setLastSeenPhotosAt();
   }
 
+  function beginFreshVisit(nextPhotos: PhotoWithUrl[]) {
+    setNewPhotoIds(new Set(photosNewerThanLastVisit(nextPhotos)));
+    knownPhotoIdsRef.current = new Set(nextPhotos.map((photo) => photo.id));
+    setLastSeenPhotosAt();
+  }
+
   async function loadPhotos() {
     setFeedError(null);
     const nextPhotos = await getPhotosWithSignedUrls();
@@ -101,19 +110,25 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
     rememberGalleryVisit(nextPhotos);
   }
 
-  async function refreshPhotos() {
+  async function refreshPhotos(startNewVisit = false) {
     try {
       const nextPhotos = await getPhotosWithSignedUrls();
       setPhotos(nextPhotos);
-      rememberGalleryVisit(nextPhotos);
+
+      if (startNewVisit) {
+        beginFreshVisit(nextPhotos);
+      } else {
+        rememberGalleryVisit(nextPhotos);
+      }
+
       setFeedError(null);
     } catch {
       // Keep the current gallery if a background refresh fails.
     }
   }
 
-  useOnVisible(() => {
-    void refreshPhotos();
+  useOnVisible((resumedFromHidden) => {
+    void refreshPhotos(resumedFromHidden);
   });
 
   useEffect(() => {
