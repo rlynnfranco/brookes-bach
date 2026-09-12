@@ -1,5 +1,12 @@
 import { convertHeicToJpeg, isHeicFile } from "@/lib/heic";
+import { createDisplayAndThumbnailJpegs } from "@/lib/image";
 import { supabase } from "@/lib/supabase";
+
+const PHOTO_COLUMNS =
+  "id, participant_id, storage_path, original_storage_path, thumbnail_storage_path, caption, created_at";
+const SIGNED_URL_BATCH_SIZE = 100;
+const DISPLAY_PROCESSING_ERROR =
+  "The original was saved, but we couldn't prepare a viewing version. Please try again.";
 
 export const PHOTO_BUCKET = "bach-photos";
 const SIGNED_URL_SECONDS = 60 * 60;
@@ -61,14 +68,24 @@ export type Photo = {
   participant_id: string;
   storage_path: string;
   original_storage_path: string | null;
+  thumbnail_storage_path: string | null;
   caption: string | null;
   created_at: string;
 };
 
 export type PhotoWithUrl = Photo & {
   signedUrl: string | null;
+  thumbnailUrl: string | null;
   uploaderName: string | null;
 };
+
+export function galleryStoragePath(photo: Photo) {
+  return photo.thumbnail_storage_path || photo.storage_path;
+}
+
+export function bookStoragePath(photo: Photo) {
+  return photo.original_storage_path || photo.storage_path;
+}
 
 export function isAcceptedImage(file: File) {
   if (file.type && ACCEPTED_IMAGE_TYPES.has(file.type.toLowerCase())) {
@@ -139,6 +156,7 @@ export async function createPhotoRow(
   storagePath: string,
   caption: string,
   originalStoragePath: string | null = null,
+  thumbnailStoragePath: string | null = null,
 ) {
   const trimmedCaption = caption.trim();
   const { data, error } = await supabase
@@ -147,11 +165,10 @@ export async function createPhotoRow(
       participant_id: participantId,
       storage_path: storagePath,
       original_storage_path: originalStoragePath,
+      thumbnail_storage_path: thumbnailStoragePath,
       caption: trimmedCaption.length > 0 ? trimmedCaption : null,
     })
-    .select(
-      "id, participant_id, storage_path, original_storage_path, caption, created_at",
-    )
+    .select(PHOTO_COLUMNS)
     .single();
 
   if (error) {
@@ -181,52 +198,78 @@ export async function addPhoto(
     throw new Error("Please choose a JPEG, PNG, WebP, or HEIC image.");
   }
 
-  const uploadedPaths: string[] = [];
+  const timestamp = Date.now();
+  const originalStoragePath = buildStoragePath(
+    participantId,
+    file.name,
+    timestamp,
+  );
+  const displayStoragePath = buildStoragePath(
+    participantId,
+    `display-${toJpegFilename(file.name)}`,
+    timestamp,
+  );
+  const thumbnailStoragePath = buildStoragePath(
+    participantId,
+    `thumb-${toJpegFilename(file.name)}`,
+    timestamp,
+  );
+  const derivedPaths: string[] = [];
 
   try {
-    if (isHeicFile(file)) {
-      onStage?.("converting");
-      const displayFile = await convertHeicToJpeg(file);
-      const timestamp = Date.now();
-      const originalStoragePath = buildStoragePath(
-        participantId,
-        file.name,
-        timestamp,
-      );
-      const storagePath = buildStoragePath(
-        participantId,
-        toJpegFilename(file.name),
-        timestamp,
-      );
+    onStage?.("uploading-original");
+    await uploadPhotoFile(originalStoragePath, file);
 
-      onStage?.("uploading-original");
-      await uploadPhotoFile(originalStoragePath, file);
-      uploadedPaths.push(originalStoragePath);
+    onStage?.("converting");
+    const sourceForDisplay = isHeicFile(file)
+      ? await convertHeicToJpeg(file)
+      : file;
 
-      onStage?.("uploading");
-      await uploadPhotoFile(storagePath, displayFile);
-      uploadedPaths.push(storagePath);
+    let displayFile: File;
+    let thumbnailFile: File | null;
 
-      onStage?.("saving");
-      return await createPhotoRow(
-        participantId,
-        storagePath,
-        caption,
-        originalStoragePath,
+    try {
+      const versions = await createDisplayAndThumbnailJpegs(
+        sourceForDisplay,
+        toSafeFilename(file.name).replace(/\.[^.]+$/, "") || "photo",
       );
+      displayFile = versions.displayFile;
+      thumbnailFile = versions.thumbnailFile;
+    } catch {
+      throw new Error(DISPLAY_PROCESSING_ERROR);
     }
 
     onStage?.("uploading");
-    const storagePath = await uploadPhotoFile(
-      buildStoragePath(participantId, file.name),
-      file,
-    );
-    uploadedPaths.push(storagePath);
+
+    try {
+      await uploadPhotoFile(displayStoragePath, displayFile);
+      derivedPaths.push(displayStoragePath);
+    } catch {
+      throw new Error(DISPLAY_PROCESSING_ERROR);
+    }
+
+    let savedThumbnailPath: string | null = null;
+
+    if (thumbnailFile) {
+      try {
+        await uploadPhotoFile(thumbnailStoragePath, thumbnailFile);
+        derivedPaths.push(thumbnailStoragePath);
+        savedThumbnailPath = thumbnailStoragePath;
+      } catch {
+        savedThumbnailPath = null;
+      }
+    }
 
     onStage?.("saving");
-    return await createPhotoRow(participantId, storagePath, caption, null);
+    return await createPhotoRow(
+      participantId,
+      displayStoragePath,
+      caption,
+      originalStoragePath,
+      savedThumbnailPath,
+    );
   } catch (error) {
-    await removeUploadedPhotos(uploadedPaths);
+    await removeUploadedPhotos(derivedPaths);
     throw error;
   }
 }
@@ -234,9 +277,7 @@ export async function addPhoto(
 export async function getPhotosNewestFirst() {
   const { data, error } = await supabase
     .from("photos")
-    .select(
-      "id, participant_id, storage_path, original_storage_path, caption, created_at",
-    )
+    .select(PHOTO_COLUMNS)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -246,6 +287,45 @@ export async function getPhotosNewestFirst() {
   return (data ?? []) as Photo[];
 }
 
+async function createSignedUrlMap(paths: string[]) {
+  const unique = [...new Set(paths.filter(Boolean))];
+  const urlByPath = new Map<string, string | null>();
+
+  for (let index = 0; index < unique.length; index += SIGNED_URL_BATCH_SIZE) {
+    const batch = unique.slice(index, index + SIGNED_URL_BATCH_SIZE);
+    const { data, error } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .createSignedUrls(batch, SIGNED_URL_SECONDS);
+
+    if (error) {
+      throw error;
+    }
+
+    for (const item of data ?? []) {
+      if (item.path) {
+        urlByPath.set(item.path, item.signedUrl ?? null);
+      }
+    }
+  }
+
+  return urlByPath;
+}
+
+function withSignedUrls(
+  photo: Photo,
+  urlByPath: Map<string, string | null>,
+  uploaderName: string | null,
+): PhotoWithUrl {
+  const displayUrl = urlByPath.get(photo.storage_path) ?? null;
+
+  return {
+    ...photo,
+    signedUrl: displayUrl,
+    thumbnailUrl: urlByPath.get(galleryStoragePath(photo)) ?? displayUrl,
+    uploaderName,
+  };
+}
+
 export async function getPhotosWithSignedUrls() {
   const photos = await getPhotosNewestFirst();
 
@@ -253,19 +333,8 @@ export async function getPhotosWithSignedUrls() {
     return [] as PhotoWithUrl[];
   }
 
-  const { data, error } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .createSignedUrls(
-      photos.map((photo) => photo.storage_path),
-      SIGNED_URL_SECONDS,
-    );
-
-  if (error) {
-    throw error;
-  }
-
-  const urlByPath = new Map(
-    (data ?? []).map((item) => [item.path, item.signedUrl ?? null]),
+  const urlByPath = await createSignedUrlMap(
+    photos.flatMap((photo) => [photo.storage_path, galleryStoragePath(photo)]),
   );
 
   const participantIds = [...new Set(photos.map((photo) => photo.participant_id))];
@@ -278,11 +347,13 @@ export async function getPhotosWithSignedUrls() {
     (participants ?? []).map((person) => [person.id as string, person.name as string]),
   );
 
-  return photos.map((photo) => ({
-    ...photo,
-    signedUrl: urlByPath.get(photo.storage_path) ?? null,
-    uploaderName: nameById.get(photo.participant_id) ?? null,
-  }));
+  return photos.map((photo) =>
+    withSignedUrls(
+      photo,
+      urlByPath,
+      nameById.get(photo.participant_id) ?? null,
+    ),
+  );
 }
 
 export function photoFromRealtimeRow(value: unknown): Photo | null {
@@ -307,6 +378,10 @@ export function photoFromRealtimeRow(value: unknown): Photo | null {
     original_storage_path:
       typeof row.original_storage_path === "string"
         ? row.original_storage_path
+        : null,
+    thumbnail_storage_path:
+      typeof row.thumbnail_storage_path === "string"
+        ? row.thumbnail_storage_path
         : null,
     caption: typeof row.caption === "string" ? row.caption : null,
     created_at: typeof row.created_at === "string" ? row.created_at : "",
@@ -334,9 +409,10 @@ export function insertPhotoNewestFirst(
 }
 
 export async function getPhotoWithSignedUrl(photo: Photo) {
-  const { data } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .createSignedUrl(photo.storage_path, SIGNED_URL_SECONDS);
+  const urlByPath = await createSignedUrlMap([
+    photo.storage_path,
+    galleryStoragePath(photo),
+  ]);
 
   const { data: participant } = await supabase
     .from("participants")
@@ -344,9 +420,9 @@ export async function getPhotoWithSignedUrl(photo: Photo) {
     .eq("id", photo.participant_id)
     .maybeSingle();
 
-  return {
-    ...photo,
-    signedUrl: data?.signedUrl ?? null,
-    uploaderName: (participant?.name as string | undefined) ?? null,
-  } satisfies PhotoWithUrl;
+  return withSignedUrls(
+    photo,
+    urlByPath,
+    (participant?.name as string | undefined) ?? null,
+  );
 }

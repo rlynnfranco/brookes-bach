@@ -1,5 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, Geist } from "next/font/google";
+import appleIcon from "./apple-icon.png";
+import favicon32 from "./favicon-32.png";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,9 +14,26 @@ const fraunces = Fraunces({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#f4efe6",
+};
+
 export const metadata: Metadata = {
-  title: "Brooke’s Bach",
-  description: "A private weekend for Brooke’s people.",
+  title: "For the Record",
+  description: "A private record of Brooke’s weekend.",
+  applicationName: "For the Record",
+  appleWebApp: {
+    capable: true,
+    title: "For the Record",
+    statusBarStyle: "default",
+  },
+  icons: {
+    icon: [{ url: favicon32.src, sizes: "32x32", type: "image/png" }],
+    apple: [{ url: appleIcon.src, sizes: "180x180", type: "image/png" }],
+  },
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

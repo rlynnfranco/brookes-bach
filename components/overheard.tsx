@@ -233,7 +233,7 @@ export function Overheard({ participant }: { participant: Participant }) {
   }
 
   return (
-    <section className="mt-10 border-t border-rule pt-8" aria-labelledby="overheard-heading">
+    <section className="mt-8" aria-labelledby="overheard-heading">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-medium tracking-[0.22em] text-ink-muted uppercase">

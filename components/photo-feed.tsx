@@ -15,7 +15,6 @@ import {
   type PhotoUploadStage,
   type PhotoWithUrl,
 } from "@/lib/photos";
-import { isHeicFile } from "@/lib/heic";
 import type { Participant } from "@/lib/participants";
 import { PhotoDetail } from "@/components/photo-detail";
 import { supabase } from "@/lib/supabase";
@@ -250,7 +249,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
     }
 
     setIsUploading(true);
-    setUploadStage(isHeicFile(selectedFile) ? "converting" : "uploading");
+    setUploadStage("uploading-original");
     setUploadError(null);
 
     try {
@@ -267,7 +266,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
   }
 
   return (
-    <section className="mt-10 border-t border-rule pt-8" aria-labelledby="photo-feed-heading">
+    <section className="mt-8" aria-labelledby="photo-feed-heading">
       <div
         inert={selectedPhoto ? true : undefined}
         aria-hidden={selectedPhoto ? true : undefined}
@@ -389,7 +388,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
         ) : null}
 
         <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
-          {photos.map((photo) => {
+          {photos.map((photo, index) => {
             const isNew = newPhotoIds.has(photo.id);
 
             return (
@@ -408,13 +407,15 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
                       : photo.caption || "Open photo"
                   }
                 >
-                  {photo.signedUrl ? (
+                  {photo.thumbnailUrl || photo.signedUrl ? (
                     // Signed URLs expire and should not be optimized through next/image.
                     // Thumbnail object-cover is display-only and does not alter the stored file.
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={photo.signedUrl}
+                      src={photo.thumbnailUrl || photo.signedUrl || ""}
                       alt={photo.caption || "Weekend photo"}
+                      loading={index < 6 ? "eager" : "lazy"}
+                      decoding="async"
                       className="aspect-square h-auto w-full object-cover"
                     />
                   ) : (

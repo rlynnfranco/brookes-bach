@@ -14,8 +14,7 @@ import {
   verifyWeekendAccessCode,
 } from "@/lib/access";
 import { isSupabaseConfigured } from "@/lib/supabase";
-import { PhotoFeed } from "@/components/photo-feed";
-import { Overheard } from "@/components/overheard";
+import { HomeSections } from "@/components/home-sections";
 
 type View = "loading" | "access" | "join" | "welcome";
 
@@ -181,7 +180,7 @@ export function JoinFlow() {
           A private weekend
         </p>
         <h1 className="font-serif mt-3 text-5xl leading-none tracking-tight text-ink sm:text-6xl">
-          Brooke&apos;s Bach
+          For the Record
         </h1>
 
         {view === "loading" ? (
@@ -304,7 +303,7 @@ export function JoinFlow() {
                     nameError ? "name-error" : error ? "join-error" : undefined
                   }
                   className="h-12 w-full rounded-md border border-rule bg-paper-raised px-4 text-base text-ink shadow-none outline-none transition-colors placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30"
-                  placeholder="Sam"
+                  placeholder="First name"
                 />
               </div>
 
@@ -340,10 +339,7 @@ export function JoinFlow() {
         ) : null}
 
         {view === "welcome" && participant ? (
-          <section aria-live="polite">
-            <PhotoFeed participant={participant} />
-            <Overheard participant={participant} />
-          </section>
+          <HomeSections participant={participant} />
         ) : null}
       </main>
     </div>
