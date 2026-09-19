@@ -408,6 +408,10 @@ export function insertPhotoNewestFirst(
   return [...photos.slice(0, insertAt), nextPhoto, ...photos.slice(insertAt)];
 }
 
+export async function getSignedUrlsByPath(paths: string[]) {
+  return createSignedUrlMap(paths);
+}
+
 export async function getPhotoWithSignedUrl(photo: Photo) {
   const urlByPath = await createSignedUrlMap([
     photo.storage_path,
