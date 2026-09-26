@@ -10,10 +10,12 @@ export function PhotoDetail({
   photo,
   participant,
   onClose,
+  onCommentsSeen,
 }: {
   photo: PhotoWithUrl;
   participant: Participant;
   onClose: () => void;
+  onCommentsSeen?: (photoId: string) => void;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -127,7 +129,11 @@ export function PhotoDetail({
           </div>
 
           <PhotoVotes photoId={photo.id} participant={participant} />
-          <PhotoComments photoId={photo.id} participant={participant} />
+          <PhotoComments
+            photoId={photo.id}
+            participant={participant}
+            onCommentsSeen={onCommentsSeen}
+          />
         </div>
       </div>
     </div>

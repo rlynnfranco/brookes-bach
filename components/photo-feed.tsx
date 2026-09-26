@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   addPhoto,
   getLastSeenPhotosAt,
@@ -15,6 +15,15 @@ import {
   type PhotoUploadStage,
   type PhotoWithUrl,
 } from "@/lib/photos";
+import {
+  commentFromRealtimeRow,
+  getLatestCommentCreatedAtByPhotoId,
+} from "@/lib/comments";
+import {
+  getCommentSeenAt,
+  isCommentNewerThan,
+  photoHasUnseenComments,
+} from "@/lib/comment-seen";
 import type { Participant } from "@/lib/participants";
 import { PhotoDetail } from "@/components/photo-detail";
 import { supabase } from "@/lib/supabase";
@@ -41,7 +50,69 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoWithUrl | null>(null);
   const [newPhotoIds, setNewPhotoIds] = useState<Set<string>>(() => new Set());
+  const [newNotePhotoIds, setNewNotePhotoIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const knownPhotoIdsRef = useRef<Set<string> | null>(null);
+  const selectedPhotoIdRef = useRef<string | null>(null);
+  selectedPhotoIdRef.current = selectedPhoto?.id ?? null;
+
+  const markCommentsSeen = useCallback((photoId: string) => {
+    setNewNotePhotoIds((current) => {
+      if (!current.has(photoId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(photoId);
+      return next;
+    });
+  }, []);
+
+  function addNewNotePhotoIds(photoIds: string[]) {
+    if (photoIds.length === 0) {
+      return;
+    }
+
+    setNewNotePhotoIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+
+      for (const photoId of photoIds) {
+        if (!next.has(photoId)) {
+          next.add(photoId);
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }
+
+  function notePhotoIdsFromLatest(
+    nextPhotos: PhotoWithUrl[],
+    latestByPhotoId: Map<string, string>,
+  ) {
+    return new Set(
+      nextPhotos
+        .filter((photo) =>
+          photoHasUnseenComments(
+            photo.id,
+            latestByPhotoId.get(photo.id) ?? null,
+          ),
+        )
+        .map((photo) => photo.id),
+    );
+  }
+
+  async function syncNewNoteIndicators(nextPhotos: PhotoWithUrl[]) {
+    try {
+      const latestByPhotoId = await getLatestCommentCreatedAtByPhotoId();
+      setNewNotePhotoIds(notePhotoIdsFromLatest(nextPhotos, latestByPhotoId));
+    } catch {
+      // Keep the current NEW NOTE labels if comment times cannot be refreshed.
+    }
+  }
 
   function addNewPhotoIds(photoIds: string[]) {
     if (photoIds.length === 0) {
@@ -107,6 +178,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
     const nextPhotos = await getPhotosWithSignedUrls();
     setPhotos(nextPhotos);
     rememberGalleryVisit(nextPhotos);
+    await syncNewNoteIndicators(nextPhotos);
   }
 
   async function refreshPhotos(startNewVisit = false) {
@@ -120,6 +192,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
         rememberGalleryVisit(nextPhotos);
       }
 
+      await syncNewNoteIndicators(nextPhotos);
       setFeedError(null);
     } catch {
       // Keep the current gallery if a background refresh fails.
@@ -140,6 +213,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
         if (isActive) {
           setPhotos(nextPhotos);
           rememberGalleryVisit(nextPhotos);
+          await syncNewNoteIndicators(nextPhotos);
         }
       } catch (error) {
         if (isActive) {
@@ -180,6 +254,39 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
               // Leave the gallery as-is if a live photo cannot be hydrated.
             }
           })();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("weekend-photo-notes")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "comments" },
+        (payload) => {
+          const row = commentFromRealtimeRow(payload.new);
+
+          if (!row) {
+            return;
+          }
+
+          if (selectedPhotoIdRef.current === row.photo_id) {
+            return;
+          }
+
+          const seenAt = getCommentSeenAt(row.photo_id);
+
+          if (seenAt && !isCommentNewerThan(row.created_at, seenAt)) {
+            return;
+          }
+
+          addNewNotePhotoIds([row.photo_id]);
         },
       )
       .subscribe();
@@ -390,6 +497,14 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
         <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
           {photos.map((photo, index) => {
             const isNew = newPhotoIds.has(photo.id);
+            const hasNewNote = newNotePhotoIds.has(photo.id);
+            const openLabel = [
+              photo.caption || "Open photo",
+              isNew ? "new" : null,
+              hasNewNote ? "new note" : null,
+            ]
+              .filter(Boolean)
+              .join(", ");
 
             return (
               <li key={photo.id}>
@@ -401,11 +516,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
                     setSelectedPhoto(photo);
                   }}
                   className="relative block w-full overflow-hidden bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-                  aria-label={
-                    isNew
-                      ? `${photo.caption || "Open photo"}, new`
-                      : photo.caption || "Open photo"
-                  }
+                  aria-label={openLabel}
                 >
                   {photo.thumbnailUrl || photo.signedUrl ? (
                     // Signed URLs expire and should not be optimized through next/image.
@@ -428,6 +539,11 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
                     New
                   </span>
                   ) : null}
+                  {hasNewNote ? (
+                  <span className="absolute right-1.5 bottom-1.5 border border-rule bg-paper/95 px-1.5 py-0.5 text-[10px] font-medium tracking-[0.16em] text-ink uppercase">
+                    New note
+                  </span>
+                  ) : null}
                 </button>
               </li>
             );
@@ -441,6 +557,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
           photo={selectedPhoto}
           participant={participant}
           onClose={() => setSelectedPhoto(null)}
+          onCommentsSeen={markCommentsSeen}
         />
       ) : null}
     </section>

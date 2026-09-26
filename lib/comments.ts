@@ -9,6 +9,30 @@ export type PhotoComment = {
   authorName: string;
 };
 
+export async function getLatestCommentCreatedAtByPhotoId() {
+  const { data, error } = await supabase
+    .from("comments")
+    .select("photo_id, created_at");
+
+  if (error) {
+    throw error;
+  }
+
+  const latestByPhotoId = new Map<string, string>();
+
+  for (const row of data ?? []) {
+    const photoId = row.photo_id as string;
+    const createdAt = row.created_at as string;
+    const current = latestByPhotoId.get(photoId);
+
+    if (!current || Date.parse(createdAt) > Date.parse(current)) {
+      latestByPhotoId.set(photoId, createdAt);
+    }
+  }
+
+  return latestByPhotoId;
+}
+
 export async function getCommentsForPhoto(photoId: string) {
   const { data, error } = await supabase
     .from("comments")

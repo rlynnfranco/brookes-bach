@@ -10,6 +10,7 @@ import {
   insertCommentOldestFirst,
   type PhotoComment,
 } from "@/lib/comments";
+import { rememberCommentsSeen } from "@/lib/comment-seen";
 import { supabase } from "@/lib/supabase";
 import { useOnVisible } from "@/lib/visibility";
 
@@ -27,9 +28,11 @@ function getErrorMessage(error: unknown) {
 export function PhotoComments({
   photoId,
   participant,
+  onCommentsSeen,
 }: {
   photoId: string;
   participant: Participant;
+  onCommentsSeen?: (photoId: string) => void;
 }) {
   const [comments, setComments] = useState<PhotoComment[]>([]);
   const [body, setBody] = useState("");
@@ -130,6 +133,16 @@ export function PhotoComments({
       void supabase.removeChannel(channel);
     };
   }, [photoId]);
+
+  useEffect(() => {
+    if (isLoading || listError || comments.length === 0) {
+      return;
+    }
+
+    if (rememberCommentsSeen(photoId, comments)) {
+      onCommentsSeen?.(photoId);
+    }
+  }, [comments, isLoading, listError, onCommentsSeen, photoId]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
