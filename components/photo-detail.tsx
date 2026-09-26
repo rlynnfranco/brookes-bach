@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Participant } from "@/lib/participants";
 import type { PhotoWithUrl } from "@/lib/photos";
 import { PhotoVotes } from "@/components/photo-votes";
@@ -10,6 +11,23 @@ function isNotesField(
   target: EventTarget | null,
 ): target is HTMLTextAreaElement {
   return target instanceof HTMLTextAreaElement;
+}
+
+function getKeyboardInset() {
+  const viewport = window.visualViewport;
+
+  if (!viewport) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    window.innerHeight - viewport.height - viewport.offsetTop,
+  );
+}
+
+function applyKeyboardInset(container: HTMLElement) {
+  container.style.setProperty("--keyboard-inset", `${getKeyboardInset()}px`);
 }
 
 function revealFieldInScrollArea(field: HTMLElement, container: HTMLElement) {
@@ -24,23 +42,67 @@ function revealFieldInScrollArea(field: HTMLElement, container: HTMLElement) {
     containerRect.bottom,
     viewport ? viewport.offsetTop + viewport.height : window.innerHeight,
   );
+  const keyboardGap = 56;
+  const usableBottom = visibleBottom - keyboardGap;
 
-  if (visibleBottom <= visibleTop) {
+  if (usableBottom <= visibleTop) {
     return;
   }
 
-  const padding = 16;
+  const padding = 24;
 
   if (
     fieldRect.top >= visibleTop + padding &&
-    fieldRect.bottom <= visibleBottom - padding
+    fieldRect.bottom <= usableBottom - padding
   ) {
     return;
   }
 
   const fieldCenter = fieldRect.top + fieldRect.height / 2;
-  const visibleCenter = (visibleTop + visibleBottom) / 2;
-  container.scrollTop += fieldCenter - visibleCenter;
+  const usableHeight = usableBottom - visibleTop;
+  const target = visibleTop + usableHeight * 0.4;
+  container.scrollTop += fieldCenter - target;
+}
+
+function lockDocumentScroll() {
+  const scrollY = window.scrollY;
+  const html = document.documentElement;
+  const body = document.body;
+  const previous = {
+    scrollY,
+    htmlOverflow: html.style.overflow,
+    htmlOverscroll: html.style.overscrollBehavior,
+    htmlBackground: html.style.backgroundColor,
+    bodyPosition: body.style.position,
+    bodyTop: body.style.top,
+    bodyWidth: body.style.width,
+    bodyOverflow: body.style.overflow,
+    bodyOverscroll: body.style.overscrollBehavior,
+    bodyBackground: body.style.backgroundColor,
+  };
+
+  html.style.overflow = "hidden";
+  html.style.overscrollBehavior = "none";
+  html.style.backgroundColor = "var(--paper)";
+  body.style.position = "fixed";
+  body.style.top = `-${scrollY}px`;
+  body.style.width = "100%";
+  body.style.overflow = "hidden";
+  body.style.overscrollBehavior = "none";
+  body.style.backgroundColor = "var(--paper)";
+
+  return function unlockDocumentScroll() {
+    html.style.overflow = previous.htmlOverflow;
+    html.style.overscrollBehavior = previous.htmlOverscroll;
+    html.style.backgroundColor = previous.htmlBackground;
+    body.style.position = previous.bodyPosition;
+    body.style.top = previous.bodyTop;
+    body.style.width = previous.bodyWidth;
+    body.style.overflow = previous.bodyOverflow;
+    body.style.overscrollBehavior = previous.bodyOverscroll;
+    body.style.backgroundColor = previous.bodyBackground;
+    window.scrollTo(0, previous.scrollY);
+  };
 }
 
 export function PhotoDetail({
@@ -57,19 +119,20 @@ export function PhotoDetail({
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [isEntered, setIsEntered] = useState(false);
 
   useEffect(() => {
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-    const previousBodyOverscroll = document.body.style.overscrollBehavior;
-    const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overscrollBehavior = "none";
-    document.documentElement.style.overscrollBehavior = "none";
-    closeButtonRef.current?.focus();
+    setPortalTarget(document.body);
+  }, []);
+
+  useEffect(() => {
+    if (!portalTarget) {
+      return;
+    }
+
+    const unlockDocumentScroll = lockDocumentScroll();
+    dialogRef.current?.focus();
 
     let cancelledEnter = false;
     const enterFrame = window.requestAnimationFrame(() => {
@@ -111,15 +174,16 @@ export function PhotoDetail({
     return () => {
       cancelledEnter = true;
       window.cancelAnimationFrame(enterFrame);
-      document.body.style.overflow = previousBodyOverflow;
-      document.documentElement.style.overflow = previousHtmlOverflow;
-      document.body.style.overscrollBehavior = previousBodyOverscroll;
-      document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
       window.removeEventListener("keydown", handleKeyDown);
+      unlockDocumentScroll();
     };
-  }, [onClose]);
+  }, [onClose, portalTarget]);
 
   useEffect(() => {
+    if (!portalTarget) {
+      return;
+    }
+
     const dialog = dialogRef.current;
     const scrollArea = scrollAreaRef.current;
 
@@ -130,6 +194,8 @@ export function PhotoDetail({
     let pending = false;
     let settleTimer = 0;
     let fallbackTimer = 0;
+
+    applyKeyboardInset(scrollArea);
 
     function revealIfNeeded() {
       const field = document.activeElement;
@@ -163,14 +229,20 @@ export function PhotoDetail({
       }
 
       pending = true;
+      applyKeyboardInset(scrollArea);
       window.clearTimeout(fallbackTimer);
       fallbackTimer = window.setTimeout(revealIfNeeded, 400);
     }
 
     function handleViewportChange() {
+      if (scrollArea) {
+        applyKeyboardInset(scrollArea);
+      }
+
       const field = document.activeElement;
 
       if (
+        !pending ||
         !scrollArea ||
         !isNotesField(field) ||
         !scrollArea.contains(field)
@@ -178,25 +250,31 @@ export function PhotoDetail({
         return;
       }
 
-      pending = true;
       scheduleReveal(180);
     }
 
     dialog.addEventListener("focusin", handleFocusIn);
     window.visualViewport?.addEventListener("resize", handleViewportChange);
     window.visualViewport?.addEventListener("scroll", handleViewportChange);
+    window.addEventListener("resize", handleViewportChange);
 
     return () => {
       window.clearTimeout(settleTimer);
       window.clearTimeout(fallbackTimer);
+      scrollArea.style.removeProperty("--keyboard-inset");
       dialog.removeEventListener("focusin", handleFocusIn);
       window.visualViewport?.removeEventListener("resize", handleViewportChange);
       window.visualViewport?.removeEventListener("scroll", handleViewportChange);
+      window.removeEventListener("resize", handleViewportChange);
     };
-  }, []);
+  }, [portalTarget]);
 
-  return (
-    <div className="fixed inset-0 z-50 min-h-[100lvh] overflow-hidden bg-paper">
+  if (!portalTarget) {
+    return null;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 isolate z-50 min-h-[100lvh] overflow-hidden bg-paper">
       <div
         className={`absolute inset-0 hidden bg-ink/55 transition-opacity duration-150 ease-out motion-reduce:opacity-100 motion-reduce:transition-none sm:block ${
           isEntered ? "opacity-100" : "opacity-0"
@@ -214,16 +292,22 @@ export function PhotoDetail({
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
-          className={`relative z-10 flex h-full max-h-full w-full max-w-lg flex-col overflow-hidden bg-paper transition-[opacity,transform] duration-150 ease-out motion-reduce:translate-y-0 motion-reduce:opacity-100 motion-reduce:transition-none sm:h-auto sm:max-h-[92vh] sm:rounded-md ${
+          tabIndex={-1}
+          className={`relative z-10 flex h-full max-h-full w-full max-w-lg flex-col overflow-hidden bg-paper outline-none transition-[opacity,transform] duration-150 ease-out motion-reduce:translate-y-0 motion-reduce:opacity-100 motion-reduce:transition-none sm:h-auto sm:max-h-[92vh] sm:rounded-md ${
             isEntered ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
           }`}
         >
           <div className="flex shrink-0 justify-end bg-paper px-3 pt-2 sm:px-4">
             <button
-              ref={closeButtonRef}
               type="button"
-              onClick={onClose}
-              className="inline-flex h-11 min-w-11 items-center justify-center border-0 bg-transparent px-2 text-sm font-medium text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+              onClick={(event) => {
+                if (event.detail > 0) {
+                  event.currentTarget.blur();
+                }
+
+                onClose();
+              }}
+              className="inline-flex h-11 min-w-11 items-center justify-center border-0 bg-transparent px-2 text-sm font-medium text-ink outline-none [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             >
               Close
             </button>
@@ -235,7 +319,7 @@ export function PhotoDetail({
 
           <div
             ref={scrollAreaRef}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain [padding-bottom:var(--keyboard-inset,0px)] [scroll-padding-bottom:var(--keyboard-inset,0px)]"
           >
             <div className="bg-paper-raised">
               {photo.signedUrl ? (
@@ -279,6 +363,7 @@ export function PhotoDetail({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    portalTarget,
   );
 }
