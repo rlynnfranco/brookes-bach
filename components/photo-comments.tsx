@@ -41,8 +41,10 @@ export function PhotoComments({
   const [listError, setListError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerBlurTimerRef = useRef<number>(0);
   const participantRef = useRef(participant);
   participantRef.current = participant;
+  const [isComposerActive, setIsComposerActive] = useState(false);
   const characterCount = body.length;
   const showCharacterCount = characterCount >= COMMENT_COUNT_THRESHOLD;
 
@@ -155,6 +157,24 @@ export function PhotoComments({
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [body]);
 
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(composerBlurTimerRef.current);
+    };
+  }, []);
+
+  function handleComposerFocus() {
+    window.clearTimeout(composerBlurTimerRef.current);
+    setIsComposerActive(true);
+  }
+
+  function handleComposerBlur() {
+    window.clearTimeout(composerBlurTimerRef.current);
+    composerBlurTimerRef.current = window.setTimeout(() => {
+      setIsComposerActive(false);
+    }, 200);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -235,67 +255,78 @@ export function PhotoComments({
         </ul>
       ) : null}
 
-      <form className="mt-4 space-y-2.5" onSubmit={handleSubmit} noValidate>
-        <label htmlFor="photo-note" className="sr-only">
-          Add a note
-        </label>
-        <textarea
-          ref={textareaRef}
-          id="photo-note"
-          name="photoNote"
-          rows={1}
-          maxLength={COMMENT_MAX_LENGTH}
-          value={body}
-          onChange={(event) => {
-            setBody(event.target.value.slice(0, COMMENT_MAX_LENGTH));
-            if (formError) {
-              setFormError(null);
-            }
-          }}
-          disabled={isSubmitting}
-          aria-invalid={formError ? true : undefined}
-          aria-describedby={
-            [
-              formError ? "photo-note-error" : null,
-              showCharacterCount ? "photo-note-count" : null,
-            ]
-              .filter(Boolean)
-              .join(" ") || undefined
-          }
-          className="block min-h-11 w-full resize-none overflow-hidden rounded-md border border-rule bg-paper-raised px-3 py-2 text-base leading-6 text-ink outline-none placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30 disabled:opacity-60"
-          placeholder="Add context, commentary, or evidence…"
-        />
-
-        {showCharacterCount ? (
-          <p
-            id="photo-note-count"
-            className="text-xs leading-4 text-ink-muted"
-          >
-            {characterCount} / {COMMENT_MAX_LENGTH}
-          </p>
-        ) : null}
-
-        {formError ? (
-          <p
-            id="photo-note-error"
-            className="text-sm leading-6 text-clay"
-            role="alert"
-          >
-            {formError}
-          </p>
-        ) : null}
-
-        <button
-          type="submit"
-          disabled={
-            isSubmitting ||
-            body.trim().length === 0 ||
-            body.length > COMMENT_MAX_LENGTH
-          }
-          className="inline-flex min-h-11 items-center justify-center rounded-md border border-rule bg-transparent px-3 text-sm font-medium text-ink transition-colors hover:bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50"
+      <form className="mt-4" onSubmit={handleSubmit} noValidate>
+        <div
+          data-photo-note-composer=""
+          onFocus={handleComposerFocus}
+          onBlur={handleComposerBlur}
+          className={`space-y-2.5 ${
+            isComposerActive
+              ? "max-sm:sticky max-sm:z-10 max-sm:bg-paper max-sm:pt-2 max-sm:[bottom:var(--keyboard-inset,0px)]"
+              : ""
+          }`}
         >
-          {isSubmitting ? "Adding…" : "Add note"}
-        </button>
+          <label htmlFor="photo-note" className="sr-only">
+            Add a note
+          </label>
+          <textarea
+            ref={textareaRef}
+            id="photo-note"
+            name="photoNote"
+            rows={1}
+            maxLength={COMMENT_MAX_LENGTH}
+            value={body}
+            onChange={(event) => {
+              setBody(event.target.value.slice(0, COMMENT_MAX_LENGTH));
+              if (formError) {
+                setFormError(null);
+              }
+            }}
+            disabled={isSubmitting}
+            aria-invalid={formError ? true : undefined}
+            aria-describedby={
+              [
+                formError ? "photo-note-error" : null,
+                showCharacterCount ? "photo-note-count" : null,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
+            className="block min-h-11 w-full resize-none overflow-hidden rounded-md border border-rule bg-paper-raised px-3 py-2 text-base leading-6 text-ink outline-none placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30 disabled:opacity-60"
+            placeholder="Add context, commentary, or evidence…"
+          />
+
+          {showCharacterCount ? (
+            <p
+              id="photo-note-count"
+              className="text-xs leading-4 text-ink-muted"
+            >
+              {characterCount} / {COMMENT_MAX_LENGTH}
+            </p>
+          ) : null}
+
+          {formError ? (
+            <p
+              id="photo-note-error"
+              className="text-sm leading-6 text-clay"
+              role="alert"
+            >
+              {formError}
+            </p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={
+              isSubmitting ||
+              body.trim().length === 0 ||
+              body.length > COMMENT_MAX_LENGTH
+            }
+            className="inline-flex min-h-11 items-center justify-center rounded-md border border-rule bg-transparent px-3 text-sm font-medium text-ink transition-colors hover:bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? "Adding…" : "Add note"}
+          </button>
+        </div>
       </form>
     </section>
   );

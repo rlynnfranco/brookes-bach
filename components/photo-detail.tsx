@@ -13,25 +13,36 @@ function isNotesField(
   return target instanceof HTMLTextAreaElement;
 }
 
-function getKeyboardInset() {
+function getKeyboardInset(layoutHeight: number) {
   const viewport = window.visualViewport;
 
   if (!viewport) {
     return 0;
   }
 
-  return Math.max(
-    0,
-    window.innerHeight - viewport.height - viewport.offsetTop,
+  const baseline = Math.max(
+    layoutHeight,
+    document.documentElement.clientHeight,
+    window.innerHeight,
+  );
+
+  return Math.max(0, baseline - viewport.height - viewport.offsetTop);
+}
+
+function applyKeyboardInset(container: HTMLElement, layoutHeight: number) {
+  container.style.setProperty(
+    "--keyboard-inset",
+    `${getKeyboardInset(layoutHeight)}px`,
   );
 }
 
-function applyKeyboardInset(container: HTMLElement) {
-  container.style.setProperty("--keyboard-inset", `${getKeyboardInset()}px`);
-}
-
-function revealFieldInScrollArea(field: HTMLElement, container: HTMLElement) {
-  const fieldRect = field.getBoundingClientRect();
+function revealComposerInScrollArea(
+  field: HTMLElement,
+  container: HTMLElement,
+) {
+  const composer =
+    field.closest("[data-photo-note-composer]") ?? field;
+  const composerRect = composer.getBoundingClientRect();
   const containerRect = container.getBoundingClientRect();
   const viewport = window.visualViewport;
   const visibleTop = Math.max(
@@ -42,26 +53,23 @@ function revealFieldInScrollArea(field: HTMLElement, container: HTMLElement) {
     containerRect.bottom,
     viewport ? viewport.offsetTop + viewport.height : window.innerHeight,
   );
-  const keyboardGap = 56;
+  const keyboardGap = 48;
   const usableBottom = visibleBottom - keyboardGap;
 
   if (usableBottom <= visibleTop) {
     return;
   }
 
-  const padding = 24;
+  const padding = 16;
 
   if (
-    fieldRect.top >= visibleTop + padding &&
-    fieldRect.bottom <= usableBottom - padding
+    composerRect.top >= visibleTop + padding &&
+    composerRect.bottom <= usableBottom
   ) {
     return;
   }
 
-  const fieldCenter = fieldRect.top + fieldRect.height / 2;
-  const usableHeight = usableBottom - visibleTop;
-  const target = visibleTop + usableHeight * 0.4;
-  container.scrollTop += fieldCenter - target;
+  container.scrollTop += composerRect.bottom - usableBottom;
 }
 
 function lockDocumentScroll() {
@@ -194,8 +202,31 @@ export function PhotoDetail({
     let pending = false;
     let settleTimer = 0;
     let fallbackTimer = 0;
+    let layoutHeight = Math.max(
+      scrollArea.getBoundingClientRect().height,
+      document.documentElement.clientHeight,
+      window.innerHeight,
+      window.visualViewport
+        ? window.visualViewport.height + window.visualViewport.offsetTop
+        : 0,
+    );
 
-    applyKeyboardInset(scrollArea);
+    applyKeyboardInset(scrollArea, layoutHeight);
+
+    function refreshLayoutHeight() {
+      if (isNotesField(document.activeElement) || !scrollArea) {
+        return;
+      }
+
+      const viewport = window.visualViewport;
+      layoutHeight = Math.max(
+        layoutHeight,
+        scrollArea.getBoundingClientRect().height,
+        document.documentElement.clientHeight,
+        window.innerHeight,
+        viewport ? viewport.height + viewport.offsetTop : 0,
+      );
+    }
 
     function revealIfNeeded() {
       const field = document.activeElement;
@@ -210,7 +241,7 @@ export function PhotoDetail({
         return;
       }
 
-      revealFieldInScrollArea(field, container);
+      revealComposerInScrollArea(field, container);
       pending = false;
     }
 
@@ -229,14 +260,16 @@ export function PhotoDetail({
       }
 
       pending = true;
-      applyKeyboardInset(scrollArea);
+      applyKeyboardInset(scrollArea, layoutHeight);
       window.clearTimeout(fallbackTimer);
       fallbackTimer = window.setTimeout(revealIfNeeded, 400);
     }
 
     function handleViewportChange() {
+      refreshLayoutHeight();
+
       if (scrollArea) {
-        applyKeyboardInset(scrollArea);
+        applyKeyboardInset(scrollArea, layoutHeight);
       }
 
       const field = document.activeElement;
