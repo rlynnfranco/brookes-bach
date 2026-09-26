@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addPhoto,
   getLastSeenPhotosAt,
@@ -37,6 +37,35 @@ function getErrorMessage(error: unknown) {
   return "Something went wrong. Please try again.";
 }
 
+function catchUpRank(
+  photoId: string,
+  newNotePhotoIds: Set<string>,
+  newPhotoIds: Set<string>,
+) {
+  if (newNotePhotoIds.has(photoId)) {
+    return 0;
+  }
+
+  if (newPhotoIds.has(photoId)) {
+    return 1;
+  }
+
+  return 2;
+}
+
+function sortPhotosForGallery(
+  photos: PhotoWithUrl[],
+  newNotePhotoIds: Set<string>,
+  newPhotoIds: Set<string>,
+) {
+  return [...photos].sort((left, right) => {
+    return (
+      catchUpRank(left.id, newNotePhotoIds, newPhotoIds) -
+      catchUpRank(right.id, newNotePhotoIds, newPhotoIds)
+    );
+  });
+}
+
 export function PhotoFeed({ participant }: { participant: Participant }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<PhotoWithUrl[]>([]);
@@ -56,6 +85,11 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
   const knownPhotoIdsRef = useRef<Set<string> | null>(null);
   const selectedPhotoIdRef = useRef<string | null>(null);
   selectedPhotoIdRef.current = selectedPhoto?.id ?? null;
+
+  const galleryPhotos = useMemo(
+    () => sortPhotosForGallery(photos, newNotePhotoIds, newPhotoIds),
+    [photos, newNotePhotoIds, newPhotoIds],
+  );
 
   const markCommentsSeen = useCallback((photoId: string) => {
     setNewNotePhotoIds((current) => {
@@ -495,7 +529,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
         ) : null}
 
         <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
-          {photos.map((photo, index) => {
+          {galleryPhotos.map((photo, index) => {
             const isNew = newPhotoIds.has(photo.id);
             const hasNewNote = newNotePhotoIds.has(photo.id);
             const openLabel = [
