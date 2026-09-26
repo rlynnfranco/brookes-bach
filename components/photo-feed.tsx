@@ -42,11 +42,11 @@ function catchUpRank(
   newNotePhotoIds: Set<string>,
   newPhotoIds: Set<string>,
 ) {
-  if (newNotePhotoIds.has(photoId)) {
+  if (newPhotoIds.has(photoId)) {
     return 0;
   }
 
-  if (newPhotoIds.has(photoId)) {
+  if (newNotePhotoIds.has(photoId)) {
     return 1;
   }
 
@@ -90,6 +90,18 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
     () => sortPhotosForGallery(photos, newNotePhotoIds, newPhotoIds),
     [photos, newNotePhotoIds, newPhotoIds],
   );
+
+  const markPhotoViewed = useCallback((photoId: string) => {
+    setNewPhotoIds((current) => {
+      if (!current.has(photoId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(photoId);
+      return next;
+    });
+  }, []);
 
   const markCommentsSeen = useCallback((photoId: string) => {
     setNewNotePhotoIds((current) => {
@@ -547,6 +559,7 @@ export function PhotoFeed({ participant }: { participant: Participant }) {
                   onClick={() => {
                     setIsComposerOpen(false);
                     resetComposer();
+                    markPhotoViewed(photo.id);
                     setSelectedPhoto(photo);
                   }}
                   className="relative block w-full overflow-hidden bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
