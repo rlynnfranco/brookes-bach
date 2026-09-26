@@ -262,7 +262,7 @@ export function PhotoComments({
               .filter(Boolean)
               .join(" ") || undefined
           }
-          className="block min-h-9 w-full resize-none overflow-hidden rounded-md border border-rule bg-paper-raised px-3 py-2 text-sm leading-5 text-ink outline-none placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30 disabled:opacity-60"
+          className="block min-h-11 w-full resize-none overflow-hidden rounded-md border border-rule bg-paper-raised px-3 py-2 text-base leading-6 text-ink outline-none placeholder:text-ink-soft focus-visible:border-clay focus-visible:ring-2 focus-visible:ring-clay/30 disabled:opacity-60"
           placeholder="Add context, commentary, or evidence…"
         />
 

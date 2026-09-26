@@ -18,15 +18,39 @@ export function PhotoDetail({
   onCommentsSeen?: (photoId: string) => void;
 }) {
   const titleId = useId();
+  const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
     const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverscroll = document.body.style.overscrollBehavior;
+    const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+    document.documentElement.style.overscrollBehavior = "none";
     closeButtonRef.current?.focus();
+
+    const overlay = overlayRef.current;
+
+    function syncOverlayToVisualViewport() {
+      const viewport = window.visualViewport;
+
+      if (!overlay) {
+        return;
+      }
+
+      if (!viewport) {
+        overlay.style.top = "";
+        overlay.style.height = "";
+        return;
+      }
+
+      overlay.style.top = `${viewport.offsetTop}px`;
+      overlay.style.height = `${viewport.height}px`;
+    }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -54,17 +78,33 @@ export function PhotoDetail({
       }
     }
 
+    syncOverlayToVisualViewport();
+    window.visualViewport?.addEventListener("resize", syncOverlayToVisualViewport);
+    window.visualViewport?.addEventListener("scroll", syncOverlayToVisualViewport);
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       document.body.style.overflow = previousBodyOverflow;
       document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overscrollBehavior = previousBodyOverscroll;
+      document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
+      window.visualViewport?.removeEventListener(
+        "resize",
+        syncOverlayToVisualViewport,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        syncOverlayToVisualViewport,
+      );
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/55 sm:items-center sm:p-4">
+    <div
+      ref={overlayRef}
+      className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] max-h-[100dvh] items-end justify-center overflow-hidden bg-ink/55 sm:items-center sm:p-4"
+    >
       <div
         className="absolute inset-0"
         onClick={onClose}
@@ -79,9 +119,9 @@ export function PhotoDetail({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative z-10 flex max-h-[100dvh] w-full max-w-lg flex-col overflow-y-auto bg-paper sm:max-h-[92vh] sm:rounded-md"
+        className="relative z-10 flex max-h-full w-full max-w-lg flex-col overflow-hidden bg-paper sm:max-h-[92vh] sm:rounded-md"
       >
-        <div className="flex justify-end px-3 pt-2 sm:px-4">
+        <div className="flex shrink-0 justify-end bg-paper px-3 pt-2 sm:px-4">
           <button
             ref={closeButtonRef}
             type="button"
@@ -96,44 +136,46 @@ export function PhotoDetail({
           {photo.caption || "Weekend photo"}
         </h2>
 
-        <div className="bg-paper-raised">
-          {photo.signedUrl ? (
-            // Signed URLs expire and should not be optimized through next/image.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photo.signedUrl}
-              alt={photo.caption || "Weekend photo"}
-              className="block h-auto w-full"
-            />
-          ) : (
-            <p className="px-4 py-10 text-center text-sm leading-6 text-ink-muted">
-              This photo could not be opened right now.
-            </p>
-          )}
-        </div>
-
-        <div className="px-4 pb-6 pt-4 sm:px-5">
-          <div>
-            {photo.caption ? (
-              <p className="font-serif text-2xl leading-8 tracking-tight text-ink">
-                {photo.caption}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="bg-paper-raised">
+            {photo.signedUrl ? (
+              // Signed URLs expire and should not be optimized through next/image.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photo.signedUrl}
+                alt={photo.caption || "Weekend photo"}
+                className="block h-auto w-full"
+              />
+            ) : (
+              <p className="px-4 py-10 text-center text-sm leading-6 text-ink-muted">
+                This photo could not be opened right now.
               </p>
-            ) : null}
-            <p
-              className={`text-sm leading-6 text-ink-muted ${
-                photo.caption ? "mt-2" : ""
-              }`}
-            >
-              {photo.uploaderName ? `by ${photo.uploaderName}` : "by a guest"}
-            </p>
+            )}
           </div>
 
-          <PhotoVotes photoId={photo.id} participant={participant} />
-          <PhotoComments
-            photoId={photo.id}
-            participant={participant}
-            onCommentsSeen={onCommentsSeen}
-          />
+          <div className="px-4 pb-6 pt-4 sm:px-5">
+            <div>
+              {photo.caption ? (
+                <p className="font-serif text-2xl leading-8 tracking-tight text-ink">
+                  {photo.caption}
+                </p>
+              ) : null}
+              <p
+                className={`text-sm leading-6 text-ink-muted ${
+                  photo.caption ? "mt-2" : ""
+                }`}
+              >
+                {photo.uploaderName ? `by ${photo.uploaderName}` : "by a guest"}
+              </p>
+            </div>
+
+            <PhotoVotes photoId={photo.id} participant={participant} />
+            <PhotoComments
+              photoId={photo.id}
+              participant={participant}
+              onCommentsSeen={onCommentsSeen}
+            />
+          </div>
         </div>
       </div>
     </div>
