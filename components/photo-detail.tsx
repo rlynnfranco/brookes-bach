@@ -154,7 +154,11 @@ export function PhotoDetail({
     }
 
     function handleFocusIn(event: FocusEvent) {
-      if (!isNotesField(event.target) || !scrollArea.contains(event.target)) {
+      if (
+        !scrollArea ||
+        !isNotesField(event.target) ||
+        !scrollArea.contains(event.target)
+      ) {
         return;
       }
 
@@ -166,7 +170,11 @@ export function PhotoDetail({
     function handleViewportChange() {
       const field = document.activeElement;
 
-      if (!isNotesField(field) || !scrollArea.contains(field)) {
+      if (
+        !scrollArea ||
+        !isNotesField(field) ||
+        !scrollArea.contains(field)
+      ) {
         return;
       }
 
