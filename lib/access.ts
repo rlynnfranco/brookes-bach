@@ -15,22 +15,17 @@ export function grantWeekendAccess() {
 }
 
 export async function verifyWeekendAccessCode(code: string) {
-  const { data, error } = await supabase
-    .from("weekend_settings")
-    .select("access_code")
-    .eq("id", 1)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc("validate_weekend_code", {
+    candidate_code: code,
+  });
 
   if (error) {
     throw error;
   }
 
-  const expectedCode =
-    typeof data?.access_code === "string" ? data.access_code.trim() : "";
-
-  if (!expectedCode) {
+  if (typeof data !== "boolean") {
     throw new Error("We couldn’t check the weekend code. Please try again.");
   }
 
-  return expectedCode.toLowerCase() === code.trim().toLowerCase();
+  return data;
 }
